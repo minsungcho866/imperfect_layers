@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imperfect Layers</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap">
+<style>
+  /* Layout: a black field; visitor-grown grid of rounded cells from the centre */
+  :root {
+    --bg: #000;
+    --ink: #fff;
+    --ink-dim: rgba(255,255,255,.55);
+    --cell: 38px;
+    --pitch: 45px;
+    --radius: 9px;
+    --serif: "EB Garamond", "Cormorant Garamond", Garamond, "Times New Roman", serif;
+    color-scheme: dark;
+  }
+  @media (max-width: 600px) {
+    :root { --cell: 28px; --pitch: 33px; --radius: 7px; }
+  }
+  html, body { height: 100%; }
+  [hidden] { display: none !important; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--serif); overflow: hidden; }
+
+  /* Side-view scene: the grid lies on the ground (#world, CSS 3D); the stacks of
+     layers are painted on a canvas (#stage) with the same camera, so any number of
+     layers draws in one surface instead of hundreds of 3D elements. */
+  #field { position: fixed; inset: 0; overflow: hidden; }
+  #world {
+    position: absolute; left: 50%; top: 50%; width: 0; height: 0;
+    transform-origin: 0 0;   /* flat: the cells are drawn into one tilted plane */
+  }
+  #stage { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .cell {
+    position: absolute;
+    width: var(--cell); height: var(--cell);
+    margin: calc(var(--cell) / -2) 0 0 calc(var(--cell) / -2);
+    background: var(--ink);
+    border-radius: var(--radius);
+    opacity: 0;
+    transition: opacity 1.6s ease, filter .2s ease;
+  }
+  #field.intro { cursor: pointer; }
+  /* During the intro the flat grid stays visible; only the squares drawn as
+     3D stacks hide their flat copy, which fades in as the stacks fade out. */
+  #field.intro .cell { pointer-events: none; transition: none; }
+  #field.intro .cell.stacked { filter: opacity(var(--grid-op, 1)); }
+
+  .caption {
+    position: fixed; z-index: 2; left: 50%; transform: translateX(-50%);
+    top: calc(28px + env(safe-area-inset-top, 0px));
+    margin: 0; width: max-content; max-width: calc(100% - 32px);
+    font-size: 15px; line-height: 1.3; text-align: left;
+    opacity: 0; transition: opacity 1.2s ease;
+  }
+  .caption.on { opacity: 1; }
+  .caption p { margin: 0; }
+  .progress {
+    margin-top: 10px; height: 12px; box-sizing: border-box;
+    border: 2px solid var(--ink); border-radius: 999px; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%; width: 0; background: var(--ink); border-radius: 999px;
+    transition: width .9s cubic-bezier(.3, .7, .2, 1);
+  }
+
+  a.cell { display: block; cursor: pointer; }
+  a.cell:hover { filter: opacity(.8); }
+  a.cell:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
+  @media (prefers-reduced-motion: reduce) { .cell, .caption, .progress-fill { transition: none; } }
+
+  /* Hint shown (always top left) when someone clicks the empty field instead of a square */
+  .hint {
+    position: fixed; z-index: 5; pointer-events: none;
+    left: 18px; top: calc(18px + env(safe-area-inset-top, 0px)); max-width: calc(100% - 36px);
+    font-size: 15px; line-height: 1.3;
+    opacity: 0; transition: opacity .35s ease;
+  }
+  .hint.on { opacity: 1; }
+
+  /* About: an editorial side panel */
+  .about-btn {
+    position: fixed; right: 16px; bottom: 16px; z-index: 6;
+    font: inherit; font-size: 18px; color: var(--ink); background: var(--bg);
+    border: none; padding: 0; cursor: pointer;
+  }
+  .about {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 4;
+    width: min(540px, 100%); box-sizing: border-box; overflow-y: auto;
+    padding: 72px 44px 88px;
+    background: var(--bg); border-left: 1px solid rgba(255, 255, 255, .22);
+    font-size: 18px; line-height: 1.4;
+    font-variant-numeric: oldstyle-nums proportional-nums;
+  }
+  /* Logo at the top of About: the logo file if there is one, otherwise the same
+     lockup set in type (title on two lines, the subtitle beside "Layers") */
+  .about .logo { margin: 0 0 40px; }
+  .about .logo img { display: block; width: 70%; max-width: 294px; height: auto; }   /* 30% smaller than full width / 420px */
+  .logo-type { font-size: 76px; line-height: .86; letter-spacing: -.005em; }
+  .logo-type .l1, .logo-type .l2 { display: block; }
+  .logo-type .l2 { display: flex; align-items: flex-end; gap: .22em; }
+  .logo-type .sub { font-size: 15px; line-height: 1.12; letter-spacing: 0; padding-bottom: .5em; }
+  @media (max-width: 600px) { .logo-type { font-size: 60px; } .logo-type .sub { font-size: 13px; } }
+  .about .label {
+    margin: 0 0 28px; font-size: 13px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .about p { margin: 0 0 1em; }
+  .about #about-you { font-size: 28px; line-height: 1.22; margin-bottom: 1.4em; }
+  @media (max-width: 600px) {
+    .about { padding: 56px 18px 80px; border-left: 0; }
+    .about #about-you { font-size: 22px; }
+  }
+
+  /* Layer popup: the clicked cell grows into a window over the grid. Square like the
+     cells, 80% of the screen's shorter side, centred. */
+  .popup {
+    position: fixed; z-index: 10; width: 80vmin; height: 80vmin;
+    left: calc(50vw - 40vmin); top: calc(50vh - 40vmin);
+    background: var(--ink); border-radius: var(--radius); overflow: hidden;
+    transform-origin: 0 0;
+  }
+  .popup iframe { display: block; width: 100%; height: 100%; border: 0; opacity: 0; }
+</style>
+
+</head>
+<body>
+<nav id="field" aria-label="Layers"><div id="world"></div><canvas id="stage" aria-hidden="true"></canvas></nav>
+
+<div class="hint" id="hint" role="status" aria-live="polite"></div>
+
+<div class="caption" id="caption">
+  <p id="caption-text" aria-live="polite"></p>
+  <div class="progress" role="progressbar" aria-label="Layers in this square" aria-valuemin="0" aria-valuemax="5" aria-valuenow="0">
+    <div class="progress-fill" id="progress-fill"></div>
+  </div>
+</div>
+
+<button class="about-btn" id="about-btn" aria-expanded="false" aria-controls="about">About</button>
+<section class="about" id="about" aria-label="About this project" hidden>
+  <div class="logo">
+    <img src="images/logo.png" alt="Imperfect Layers: On Concealing, Waiting, and the Beauty of Clumsiness"
+         onerror="this.hidden = true; this.nextElementSibling.hidden = false;">
+    <p class="logo-type" hidden aria-label="Imperfect Layers: On Concealing, Waiting, and the Beauty of Clumsiness">
+      <span class="l1">Imperfect</span>
+      <span class="l2">Layers<span class="sub">On Concealing,<br>Waiting,<br>and the<br>Beauty of Clumsiness</span></span>
+    </p>
+  </div>
+  <p id="about-you"></p>
+  <p>This project began with the layers of concrete patched over cracks in the road. When a passerby notices those clumsy, stacked repairs, they can sense the warmth inside them. Our imperfection, rather than hiding it, is how we come to recognize each other's warmth.</p>
+  <p>This website grows a new layer with every visit. I can see more, and more clearly, because others came before me. And my visit makes the way a little easier for whoever comes next.</p>
+</section>
+
+<div class="popup" id="popup" role="dialog" aria-modal="true" aria-label="Layer" hidden></div>
+
+<script>
+(() => {
+  const STEP = 5;             // visits per square: each visit adds one layer (20% opacity)
+  const FLOOR = 0.06;         // a brand-new square is barely there
+  const SEED = 1955;          // same seed = same shape for every visitor
+
+  // Intro camera
+  const SIDE_TILT = 77;       // deg, low side view of the stacks
+  const SIDE_SKEW = -8;       // deg, leans the slabs into parallelograms
+  const LAYER_GAP = 2.2;      // px between layers (before zoom)
+
+  const field = document.getElementById('field');
+  const world = document.getElementById('world');
+  const stage = document.getElementById('stage');   // canvas the stacks are painted on
+  const ctx = stage.getContext('2d');
+  const els = [];             // DOM cells by index
+  const coords = [[0, 0]];    // grid positions by index, grown deterministically
+  let visits = 0;
+
+  const css = name => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+  let PITCH = css('--pitch'), CELL = css('--cell');
+
+  // Seeded PRNG (mulberry32) so the "random" growth is identical everywhere
+  function rng(seed) {
+    return () => {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  const rand = rng(SEED);
+  const taken = new Set(['0,0']);
+  const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
+
+  let sumX = 0, sumY = 0;     // running sum of all cell positions (the shape's centre of mass)
+  function candidate() {
+    // Bias toward the most recent cells so arms reach out like cracks,
+    // while sometimes budding from anywhere to thicken the body.
+    for (let tries = 0; tries < 400; tries++) {
+      const r = rand();
+      const span = Math.max(1, Math.ceil(coords.length * (r < 0.6 ? 0.25 : 1)));
+      const from = coords[coords.length - 1 - Math.floor(rand() * span)];
+      const d = DIRS[Math.floor(rand() * 4)];
+      const x = from[0] + d[0], y = from[1] + d[1];
+      if (!taken.has(x + ',' + y)) return [x, y];
+    }
+  }
+  function grow() {
+    // Of a few crack-like candidates, keep the one that pulls the shape's centre
+    // back toward the first square, so it spreads in every direction instead of
+    // drifting off one side.
+    let best = null, bestScore = Infinity;
+    for (let c = 0; c < 3; c++) {
+      const p = candidate();
+      if (!p) continue;
+      const score = (sumX + p[0]) ** 2 + (sumY + p[1]) ** 2;
+      if (score < bestScore) { best = p; bestScore = score; }
+    }
+    if (!best) return;
+    taken.add(best[0] + ',' + best[1]); coords.push(best);
+    sumX += best[0]; sumY += best[1];
+  }
+
+
+  function place(el, i) {
+    const [x, y] = coords[i];
+    el.style.left = (x * PITCH) + 'px';
+    el.style.top  = (y * PITCH) + 'px';
+  }
+
+  function cellEl(i) {
+    while (coords.length <= i) grow();
+    if (!els[i]) {
+      const el = document.createElement('a');
+      el.className = 'cell';
+      el.href = 'layer.html#' + (i + 1);
+      el.setAttribute('aria-label', 'Layer ' + (i + 1));
+      place(el, i);
+      world.appendChild(el);
+      els[i] = el;
+    }
+    return els[i];
+  }
+
+  function render(n = visits) {
+    const full = Math.floor(n / STEP);
+    // a completed square does not hint at the next one: it appears only with its first layer
+    const count = n % STEP === 0 ? full : full + 1;
+    for (let i = 0; i < count; i++) {
+      const el = cellEl(i);
+      const op = i < full ? 1 : Math.max(FLOOR, (n % STEP) / STEP);
+      // first paint of a new cell: let the transition run from 0
+      requestAnimationFrame(() => { el.style.opacity = op; });
+    }
+    for (let i = count; i < els.length; i++) if (els[i]) els[i].style.opacity = 0;
+  }
+
+  addEventListener('resize', () => {
+    PITCH = css('--pitch'); CELL = css('--cell');
+    els.forEach((el, i) => el && place(el, i));
+    sizeStage(); draw();
+  });
+
+  const note = t => console.info(t);
+
+  // Caption
+  const ordinal = n => {
+    const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  };
+  const caption = document.getElementById('caption');
+  function setCaption(n) {
+    if (n < 1) { caption.classList.remove('on'); return; }
+    const square = Math.floor((n - 1) / STEP) + 1;
+    const layer = (n - 1) % STEP + 1;
+    document.getElementById('caption-text').innerHTML = captionText(n);
+    caption.classList.add('on');
+    setProgress(layer - 1, false);
+  }
+  function captionText(n) {
+    const square = Math.floor((n - 1) / STEP) + 1;
+    const layer = (n - 1) % STEP + 1;
+    return layer === STEP
+      ? `You are the ${ordinal(n)} visitor of this<br>website and completed the ${ordinal(square)} square`
+      : `You are the ${ordinal(n)} visitor of this<br>website and created the ${ordinal(layer)} layer<br>of the ${ordinal(square)} square`;
+  }
+  // progress bar: layers filled in this visitor's square, out of STEP
+  function setProgress(k, animate = true) {
+    const fill = document.getElementById('progress-fill');
+    if (!animate) fill.style.transition = 'none';
+    fill.style.width = (k / STEP * 100) + '%';
+    if (!animate) { fill.offsetWidth; fill.style.transition = ''; }
+    caption.querySelector('.progress').setAttribute('aria-valuenow', k);
+  }
+
+  // ---- Stacks (canvas) ----------------------------------------------
+  // scene: what the side view shows; null outside the intro
+  let scene = null;
+  function sizeStage() {
+    const dpr = devicePixelRatio || 1;
+    stage.width = Math.round(innerWidth * dpr);
+    stage.height = Math.round(innerHeight * dpr);
+  }
+  function buildStacks(n) {
+    // layers already on each square before this visit
+    const before = n - 1;
+    const full = Math.floor(before / STEP);
+    const focus = Math.floor((n - 1) / STEP);
+    while (coords.length <= focus) grow();
+    const list = [];
+    for (let i = 0; i <= focus; i++) {
+      list.push({ i, layers: i < full ? STEP : before % STEP });
+      cellEl(i).classList.add('stacked');
+    }
+    // back rows first, so nearer stacks are painted over farther ones
+    list.sort((a, b) => coords[a.i][1] - coords[b.i][1]);
+    return list;
+  }
+
+  const sideZoom = () => Math.max(1, Math.min(innerWidth * 0.42, innerHeight * 0.75) / CELL);
+  // Camera for progress p (1: side view zoomed on the focus square; 0: flat top view).
+  // In the side view the camera also circles the stack (scene.yaw, degrees),
+  // which unwinds to nothing as it rises to the top view.
+  function view(p, focus, layers) {
+    const yawDeg = scene ? scene.yaw : 0;
+    const zoom = sideZoom();
+    const S = 1 + (zoom - 1) * p;
+    const a = SIDE_TILT * p * Math.PI / 180, sk = SIDE_SKEW * p * Math.PI / 180;
+    const yaw = yawDeg * p * Math.PI / 180;
+    const off = (innerHeight * 0.1 + zoom * layers * LAYER_GAP * Math.sin(SIDE_TILT * Math.PI / 180)) * p;
+    // Pivot on the focus square and slide it on screen in a straight line from
+    // the centre (p = 1) to its own place in the grid (p = 0). Pivoting on the
+    // grid's origin instead swings far-off squares out of view mid-zoom.
+    const fx = coords[focus][0] * PITCH, fy = coords[focus][1] * PITCH;
+    return { S, a, sk, yaw, fx, fy, atx: fx * (1 - p), aty: off + fy * (1 - p) };
+  }
+  function camera(p, focus, layers) {
+    const v = view(p, focus, layers);
+    world.style.transform = `translate(${v.atx}px, ${v.aty}px) scale(${v.S}) rotateX(${v.a}rad) skewX(${v.sk}rad) rotateZ(${v.yaw}rad) translate(${-v.fx}px, ${-v.fy}px)`;
+    if (scene) scene.p = p;
+  }
+  // ground plane -> screen for the same camera as #world (orthographic):
+  // screen = centre + at + M (P - F), lifted by S·sin(tilt) per unit of height
+  function planeMatrix(v) {
+    const cosA = Math.cos(v.a), sinA = Math.sin(v.a), tS = Math.tan(v.sk);
+    const c = Math.cos(v.yaw), s = Math.sin(v.yaw);
+    const m00 = v.S * (c + tS * s), m01 = v.S * (-s + tS * c);
+    const m10 = v.S * cosA * s,     m11 = v.S * cosA * c;
+    const e = innerWidth / 2 + v.atx - (m00 * v.fx + m01 * v.fy);
+    const f = innerHeight / 2 + v.aty - (m10 * v.fx + m11 * v.fy);
+    return { m00, m01, m10, m11, e, f, lift: v.S * sinA };
+  }
+
+  function slabPath(x, y) {
+    const r = scene.radius, c = CELL;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x - c / 2, y - c / 2, c, c, r);
+    else ctx.rect(x - c / 2, y - c / 2, c, c);
+  }
+
+  // The camera circles the stack: from -16° toward -8° before the drop, then on as it rises
+  const YAW_START = -16, YAW_DRIFT = 8;
+
+  function draw() {
+    const dpr = devicePixelRatio || 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, stage.width, stage.height);
+    if (!scene || scene.op <= 0) return;
+    const v = view(scene.p, scene.focus, scene.layer);
+    const M = planeMatrix(v);
+    const at = z => ctx.setTransform(dpr * M.m00, dpr * M.m10, dpr * M.m01, dpr * M.m11, dpr * M.e, dpr * (M.f - M.lift * z));
+
+    // the stacks, back to front
+    const c = Math.cos(v.yaw), sn = Math.sin(v.yaw);
+    scene.list.sort((p, q) => (sn * coords[p.i][0] + c * coords[p.i][1]) - (sn * coords[q.i][0] + c * coords[q.i][1]));
+    const slab = (x, y, z, alpha) => {
+      at(z);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = 'rgba(0, 0, 0, .6)';      // a soft edge under each layer, so the layers read apart
+      slabPath(x, y + 3); ctx.fill();
+      ctx.fillStyle = '#fff';
+      slabPath(x, y); ctx.fill();
+    };
+    const op = scene.op;
+    for (const st of scene.list) {
+      const x = coords[st.i][0] * PITCH, y = coords[st.i][1] * PITCH;
+      for (let k = 1; k <= st.layers; k++) slab(x, y, k * LAYER_GAP, 0.2 * op);
+      if (st.i === scene.focus) {
+        // a fading trail behind the falling layer
+        if (scene.vz > 0) for (let g = 5; g >= 1; g--) slab(x, y, scene.dropZ + g * scene.vz * 14, 0.2 * op * (1 - g / 6) * 0.6);
+        slab(x, y, scene.dropZ, 0.2 * op);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+  function loop() {
+    if (!scene) return;
+    // until the rise, the camera keeps circling
+    if (!scene.rise) {
+      const d = Math.min(1, Math.max(0, (performance.now() - scene.drift) / 2600));
+      const e = 1 - Math.pow(1 - d, 3);
+      scene.yaw = YAW_START + YAW_DRIFT * e;
+      camera(1, scene.focus, scene.layer);
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  const ease = {
+    inOut: t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
+    in: t => t * t * t,
+  };
+  function tween(ms, fn) {
+    return new Promise(res => {
+      if (skipped) { fn(1); return res(); }
+      const t0 = performance.now();
+      const tick = now => {
+        const t = Math.min(1, (now - t0) / ms);
+        fn(t);
+        if (t < 1 && !skipped) requestAnimationFrame(tick); else { fn(1); res(); }
+      };
+      requestAnimationFrame(tick);
+    });
+  }
+  const wait = ms => new Promise(r => skipped ? r() : setTimeout(r, ms));
+  let skipped = false;
+
+  async function intro(n) {
+    const focus = Math.floor((n - 1) / STEP);
+    const layer = (n - 1) % STEP + 1;
+    field.classList.add('intro');
+    render(n - 1);
+    cellEl(focus);
+    // the new layer starts above the screen
+    const lift = innerHeight * 1.1 / (sideZoom() * Math.sin(SIDE_TILT * Math.PI / 180));
+    const zEnd = layer * LAYER_GAP;
+    scene = {
+      list: buildStacks(n), focus, layer, p: 1, op: 0, dropZ: zEnd + lift, radius: css('--radius'),
+      yaw: YAW_START, drift: performance.now(), vz: 0, rise: 0,
+    };
+    sizeStage();
+    camera(1, focus, layer);
+    world.style.setProperty('--grid-op', 0);
+    loop();
+
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await tween(250, t => { scene.op = t; });   // stacks fade in instead of popping in
+    setCaption(n);
+    await wait(500);
+    // fall
+    await tween(1600, t => {
+      scene.dropZ = zEnd + lift * (1 - ease.in(t));
+      scene.vz = lift * 3 * t * t / 1600;        // height per ms, for the trail
+    });
+    scene.vz = 0;
+    setProgress(layer);   // (the flat grid catches up in finish(); repainting it mid-intro stalls large grids)
+    await wait(1100);
+    // rise to the top view, still circling; the stacks dissolve into the flat grid
+    caption.classList.remove('on');
+    const yaw0 = scene.yaw;
+    scene.rise = performance.now();
+    await tween(3000, t => {
+      const e = ease.inOut(t);
+      const fade = Math.min(1, Math.max(0, (t - 0.5) / 0.4));
+      scene.yaw = yaw0 * (1 - e) + (yaw0 - 14) * e;   // keeps turning as it rises (and unwinds to 0 with p)
+      camera(1 - e, focus, layer);
+      scene.op = 1 - fade;
+      world.style.setProperty('--grid-op', fade);
+    });
+    finish(n);
+  }
+
+  function finish(n) {
+    skipped = true;
+    scene = null;
+    draw();
+    els.forEach(el => el && el.classList.remove('stacked'));
+    world.style.transform = 'none';
+    field.classList.remove('intro');
+    render(n);
+    caption.classList.remove('on');
+  }
+
+  field.addEventListener('click', e => {
+    if (field.classList.contains('intro')) { e.preventDefault(); skipped = true; }
+  }, true);
+
+  // ---- Layer popup ----------------------------------------------------
+  // A cell opens layer.html in a popup over the grid. A fresh frame each time,
+  // so the lines and photo are drawn again on every opening.
+  const popup = document.getElementById('popup');
+  const GROW_MS = 650, FADE_MS = 200;
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let opener = null, busy = false;
+  const CELL_RADIUS = () => css('--radius');
+
+  // transform that puts the popup exactly over a cell's rectangle
+  function overCell(cell) {
+    const c = cell.getBoundingClientRect(), p = popup.getBoundingClientRect();
+    const sx = c.width / p.width, sy = c.height / p.height, r = CELL_RADIUS();
+    return {
+      transform: `translate(${c.left - p.left}px, ${c.top - p.top}px) scale(${sx}, ${sy})`,
+      borderRadius: `${r / sx}px / ${r / sy}px`,   // undo the scale so the corners stay the cell's
+    };
+  }
+  const shown = { transform: 'none', borderRadius: CELL_RADIUS() + 'px' };
+
+  async function openLayer(href, from) {
+    if (busy) return;
+    busy = true;
+    opener = from;
+    const frame = document.createElement('iframe');
+    frame.title = 'Layer';
+    frame.src = href;
+    popup.replaceChildren(frame);
+    popup.hidden = false;
+    if (!reduceMotion) {
+      // the cell grows into the window, then the page fades in on it
+      await popup.animate([overCell(from), shown], { duration: GROW_MS, easing: 'cubic-bezier(.3, .7, .2, 1)' }).finished;
+      await frame.animate([{ opacity: 0 }, { opacity: 1 }], { duration: FADE_MS, fill: 'forwards' }).finished;
+    }
+    frame.style.opacity = 1;
+    frame.contentWindow.focus();
+    busy = false;
+  }
+  async function closeLayer() {
+    if (popup.hidden || busy) return;
+    busy = true;
+    const frame = popup.querySelector('iframe');
+    if (!reduceMotion && opener && opener.isConnected) {
+      // the reverse: the page fades, and the window shrinks back into its cell
+      await frame.animate([{ opacity: 1 }, { opacity: 0 }], { duration: FADE_MS, fill: 'forwards' }).finished;
+      await popup.animate([shown, overCell(opener)], { duration: GROW_MS, easing: 'cubic-bezier(.6, 0, .4, 1)', fill: 'forwards' }).finished;
+    }
+    popup.hidden = true;
+    popup.getAnimations().forEach(a => a.cancel());
+    popup.replaceChildren();
+    if (opener) opener.focus();
+    busy = false;
+  }
+  field.addEventListener('click', e => {
+    const cell = e.target.closest('a.cell');
+    if (!cell || field.classList.contains('intro')) return;
+    e.preventDefault();
+    openLayer(cell.getAttribute('href'), cell);
+  });
+  // Clicking the black field instead of a square: a light-hearted nudge, top left.
+  // Each miss gets the next line, so repeat clickers get something new.
+  const HINTS = [
+    'That’s just asphalt. The squares are where the good stuff is.',
+    'Nothing to repair here. {Click} a square instead.',
+    'You found the void. Impressive, but {click} a square.',
+    'Bold move, patching thin air. {Click} a square.',
+    'The road is fine there. Promise. {Click} a square.',
+    'Still black. Still empty. Still not a square.',
+    'Every crack has its patch. This one’s just road. {Click} a square.',
+  ];
+  const hint = document.getElementById('hint');
+  let hintTimer = 0, hintNext = 0;
+  field.addEventListener('click', e => {
+    if (e.target.closest('a.cell') || field.classList.contains('intro') || !popup.hidden) return;
+    const act = matchMedia('(hover: none)').matches ? 'tap' : 'click';
+    hint.textContent = HINTS[hintNext++ % HINTS.length]
+      .replace('{click}', act).replace('{Click}', act[0].toUpperCase() + act.slice(1));
+    hint.classList.add('on');
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => hint.classList.remove('on'), 2400);
+  });
+
+  // the layer page asks to close (its × button or Esc)
+  addEventListener('message', e => {
+    const frame = popup.querySelector('iframe');
+    if (frame && e.source === frame.contentWindow && e.data === 'imperfect-layers:close') closeLayer();
+  });
+  addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!about.hidden) setAbout(false); else closeLayer();
+  });
+
+  // About panel: the button toggles it
+  const about = document.getElementById('about');
+  const aboutBtn = document.getElementById('about-btn');
+  function setAbout(open) {
+    about.hidden = !open;
+    aboutBtn.setAttribute('aria-expanded', open);
+    aboutBtn.textContent = open ? '×' : 'About';
+    aboutBtn.setAttribute('aria-label', open ? 'Close' : 'About');
+  }
+  aboutBtn.addEventListener('click', () => setAbout(about.hidden));
+
+  // Local record: every page load adds one visit (stored in this browser)
+  const KEY = 'imperfect-layers-visits';
+  try { visits = (parseInt(localStorage.getItem(KEY), 10) || 0) + 1; localStorage.setItem(KEY, visits); }
+  catch (e) { visits = 1; note('This browser blocks storage, so visits will not accumulate.'); }
+
+  // About: who came before this visitor, and what they left
+  function aboutYou(n) {
+    const before = n - 1;
+    const square = Math.floor((n - 1) / STEP) + 1, layer = (n - 1) % STEP + 1;
+    const made = Math.ceil(before / STEP);          // squares with at least one layer before this visit
+    const plural = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+    const yours = `Your visit laid the ${ordinal(layer)} layer of the ${ordinal(square)} square`;
+    if (before === 0) {
+      return `You are the first visitor. No one came before you, so there is almost nothing to see yet. ` +
+             `${yours}, and whoever comes next will see a little more because of you.`;
+    }
+    return `You are the ${ordinal(n)} visitor. Before you, ${plural(before, 'person', 'people')} came here, ` +
+           `and together they left ${plural(made, 'square', 'squares')}, one thin layer at a time. ` +
+           `That is why you can see this much now. ${yours}, and whoever comes next will see a little more because of you.`;
+  }
+  document.getElementById('about-you').textContent = aboutYou(visits);
+
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) finish(visits);
+  else intro(visits).then(() => finish(visits));
+
+  // Shift + R clears the local record (for testing)
+  addEventListener('keydown', e => {
+    if (e.shiftKey && e.key === 'R') {
+      try { localStorage.removeItem(KEY); } catch (e) {}
+      visits = 0; render();
+    }
+  });
+})();
+</script>
+</body>
+</html>

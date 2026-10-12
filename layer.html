@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imperfect Layers — Text</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond&display=swap">
+<style>
+  /* A white page of lines about mending; more of them surface as the layers grow. */
+  :root {
+    --bg: #fff;
+    --ink: #000;
+    --serif: "adobe-garamond-pro", "Adobe Garamond Pro", "EB Garamond", Garamond, serif;
+    color-scheme: light;
+  }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--serif); overflow: hidden; }   /* everything is fitted to one screen: no scrolling */
+  #text {
+    box-sizing: border-box; padding: 216px 18px 18px;
+    font-size: 18px; line-height: 1.3;
+  }
+  #text p { margin: 0; }
+  /* Three columns: text | photo | empty, with equal outer columns, so the photo sits
+     at the horizontal centre of the page and the text fills the space to its left.
+     The photo is then moved (in the script) to the vertical centre of the window. */
+  .row { display: grid; grid-template-columns: 1fr auto 1fr; column-gap: 36px; align-items: start; }
+  .lines { grid-column: 1; min-width: 0; }
+  /* Crop 20% off every edge: the frame keeps the photo's shape (set from its size
+     in the script) and the image inside is 1/0.6 as large, shifted by its 20%. */
+  .photo { grid-column: 2; width: min(36vw, 420px); margin: 0; position: relative; overflow: hidden; }
+  .photo img { position: absolute; display: block; width: 166.667%; height: 166.667%; left: -33.333%; top: -33.333%; }
+  @media (max-width: 600px) {
+    .row { grid-template-columns: 1fr; row-gap: 18px; }
+    .photo { grid-column: 1; width: 100%; justify-self: center; }
+  }
+  .home-btn {
+    position: fixed; right: 18px; top: 18px; z-index: 3;
+    font-size: 56px; line-height: 1.3; color: var(--ink); background: var(--bg);
+    text-decoration: none; display: block; line-height: 0;
+  }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main id="text">
+  <div class="row">
+    <div class="lines" id="lines" aria-live="polite"></div>
+    <figure class="photo"><img id="photo" alt="A patched spot in the pavement, photographed from above"></figure>
+  </div>
+</main>
+
+<a class="home-btn" href="imperfect-layers.html" aria-label="Back to the first page"><svg width="36" height="36" viewBox="0 0 36 36" aria-hidden="true"><path d="M4 4L32 32M32 4L4 32" stroke="currentColor" stroke-width="1" fill="none"/></svg></a>
+
+<script type="text/plain" id="source">
+The road remembers every hand that mended it.
+A patch is a small letter left by a stranger.
+Grey on grey, the repairs pile up like seasons.
+Where the asphalt split, someone knelt down and filled it.
+No one asked them to make it beautiful, only to make it hold.
+The cracks are where the ground tells the truth.
+Each layer covers the last, but never quite erases it.
+You can read a street by its scars.
+Someone walked here before me, and the way is smoother for it.
+A clumsy repair is still an act of care.
+The concrete was poured by tired people at the end of a long day.
+What is broken and mended is no longer only broken.
+The seams do not hide; they show where we held on.
+Under my feet: a quiet record of being looked after.
+Perfect surfaces have nothing to say.
+A crack is an opening, not only an ending.
+Layer upon layer, the road becomes a shared memory.
+The rough edges catch the light at evening.
+I step over a patch shaped like a small island.
+Warmth is easier to see where something gave way.
+We are made of repairs we did not see happen.
+The next person will walk on what I leave behind.
+Nothing here was finished; it was only continued.
+The mismatched colours are a map of attention.
+Even the hasty fixes say: someone noticed.
+A city is held together by small, unglamorous gestures.
+Rain gathers in the dips the repairs could not level.
+Old cracks under new concrete, still there, still part of it.
+The ground is softer where it has been mended many times.
+I see more clearly because others came before me.
+To be imperfect together is to be visible together.
+Each visit adds a thin layer, almost nothing, but not nothing.
+The patches do not match, and that is how I know they were made by people.
+A repair is a conversation with whoever comes next.
+The surface is rough, and the roughness is kind.
+Somewhere beneath this line is the first crack of all.
+We recognize each other by the places we have been repaired.
+The road does not hide its history from the people who walk it.
+Stacked, uneven, holding: this is what care looks like in public.
+Every layer was once the newest one.
+</script>
+
+<script>
+(() => {
+  // Each cell has its own text and photo: the cell number comes from the link
+  // (layer.html#7 is the 7th cell), and the same cell always shows the same page.
+  const cell = Math.max(1, parseInt(location.hash.slice(1), 10) || 1);
+  const LINES_PER_CELL = 2;
+
+  // Seeded PRNG (mulberry32): the cell number picks its lines, identically every time
+  function rng(seed) {
+    return () => {
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  const rand = rng(cell * 7919);
+
+  const text = document.getElementById('text');
+  const all = document.getElementById('source').textContent.trim().split('\n');
+  const picks = new Set();
+  while (picks.size < Math.min(LINES_PER_CELL, all.length)) picks.add(Math.floor(rand() * all.length));
+  const paras = [...picks].sort((x, y) => x - y).map(i => {
+    const p = document.createElement('p');
+    p.textContent = all[i];
+    return p;
+  });
+  const lines = document.getElementById('lines');
+  lines.append(...paras);
+
+  // The cell's photo from images/web (1.jpg … 50.jpg), in order; after 50 it starts over
+  const PHOTOS = 50;
+  const photo = document.getElementById('photo');
+  photo.addEventListener('load', () => {
+    photo.parentElement.style.aspectRatio = photo.naturalWidth + ' / ' + photo.naturalHeight;
+    fit();
+  });
+  photo.src = `images/web/${(cell - 1) % PHOTOS + 1}.jpg`;
+  const shown = paras.length;
+  document.title = `Square ${cell}`;
+
+  // Fit everything to one screen, so the page never scrolls.
+  // Text: as before. It starts at the middle of the screen and rises as more lines
+  // appear (no higher than the CSS top margin); if it still does not fit it may rise
+  // to just below the ×, and as a last resort the type gets smaller.
+  // Photo: centred. Beside the text it sits at the vertical centre of the window;
+  // under the text (narrow windows) it sits in the middle of the room left below.
+  const MIN_TOP = parseFloat(getComputedStyle(text).paddingTop);
+  const TIGHT_TOP = 60;        // just clear of the × button (18px + 36px)
+  const EDGE = 14;             // bottom margin
+  const GAP = 18;              // text-to-photo gap when the photo sits below
+  const MARGIN = 56;           // photo's margin from the top and bottom of the window
+  const MIN_PHOTO = 96;        // smallest photo width worth showing
+  const row = document.querySelector('.row');
+  const fig = photo.parentElement;
+  function fit() {
+    const H = innerHeight;
+    const ratio = photo.naturalWidth ? photo.naturalWidth / photo.naturalHeight : 0.75;
+    const restTop = Math.min(MIN_TOP, H * 0.3);   // the CSS top margin, scaled down in a small window
+    fig.style.display = '';
+    fig.style.transform = '';
+    fig.style.marginTop = '';
+    text.style.paddingBottom = EDGE + 'px';
+    for (let size = 18; size >= 5; size--) {
+      text.style.fontSize = size + 'px';
+      fig.style.width = '';
+      const stacked = getComputedStyle(row).gridTemplateColumns.split(' ').length === 1;
+      const fullW = fig.getBoundingClientRect().width;
+
+      if (!stacked) {
+        // photo first (its width decides how the text wraps), sized to the window's height
+        const w = Math.min(fullW, (H - 2 * MARGIN) * ratio);
+        fig.style.width = w + 'px';
+        const linesH = shown ? lines.offsetHeight : 0;
+        let top = Math.max(restTop, H / 2 - linesH);
+        if (top + linesH > H - EDGE) top = Math.max(TIGHT_TOP, H - EDGE - linesH);
+        if (top + linesH > H - EDGE) continue;          // text too tall: smaller type
+        text.style.paddingTop = top + 'px';
+        // the grid puts the photo's top level with the text; move it to the vertical centre
+        fig.style.transform = `translateY(${H / 2 - (top + (w / ratio) / 2)}px)`;
+        return;
+      }
+
+      // narrow window: text as before, the photo below it, centred in the room that is left
+      const minW = Math.min(MIN_PHOTO, fullW);
+      for (let pass = 0; pass < 2; pass++) {
+        const linesH = shown ? lines.offsetHeight : 0;
+        const room = top => H - EDGE - (top + linesH + GAP);
+        let top = Math.max(restTop, H / 2 - linesH);
+        if (top + linesH > H - EDGE || room(top) * ratio < minW) {
+          top = Math.max(TIGHT_TOP, H - EDGE - (linesH + GAP + minW / ratio));
+        }
+        text.style.paddingTop = top + 'px';
+        const w = Math.max(0, Math.min(fullW, room(top) * ratio));
+        fig.style.width = w + 'px';
+        if (pass === 1 && top + linesH <= H - EDGE && w >= minW) {
+          fig.style.marginTop = Math.max(0, (room(top) - w / ratio) / 2) + 'px';
+          return;
+        }
+      }
+    }
+    // still too much: keep the text, drop the photo
+    fig.style.display = 'none';
+    const linesH = lines.offsetHeight;
+    text.style.paddingTop = Math.max(TIGHT_TOP, Math.min(restTop, H - EDGE - linesH)) + 'px';
+  }
+  fit();
+  addEventListener('resize', fit);
+
+  // Inside the grid's popup, leaving means closing the popup; opened on its
+  // own, it means going to the grid page.
+  const inPopup = window.parent !== window;
+  function leave() {
+    if (inPopup) parent.postMessage('imperfect-layers:close', '*');
+    else location.href = 'imperfect-layers.html';
+  }
+  document.querySelector('.home-btn').addEventListener('click', e => { e.preventDefault(); leave(); });
+
+  // Esc leaves
+  addEventListener('keydown', e => { if (e.key === 'Escape') leave(); });
+})();
+</script>
+</body>
+</html>
